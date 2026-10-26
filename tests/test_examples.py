@@ -248,3 +248,142 @@ def test_workshop_removal_requires_confirmation_and_removes_history(
         assert get_item_by_name(connection, "Floor jack") is None
         assert get_inspections_for_item(connection, item_id) == []
         assert len(get_items(connection)) == 5
+
+
+def test_new_inventory_demo(
+    db_path: Path,
+    demo_today: date,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    arguments = ["--db", str(db_path)]
+    assert main([*arguments, "list"]) == 0
+    assert capsys.readouterr().out == "No items.\n"
+    assert main([*arguments, "due"]) == 0
+    assert capsys.readouterr().out == "Nothing due.\n"
+
+    equipment = [
+        ("Portable work light", 7, "electrical", "Cable, plug, and switch checked."),
+        ("Tool trolley", 30, "storage", "Wheels, brakes, and drawers checked."),
+    ]
+    for name, interval, category, notes in equipment:
+        assert main([
+            *arguments, "add", name, "--interval", str(interval), "--category", category,
+        ]) == 0
+        assert capsys.readouterr().out == f"Added: {name} (every {interval} days)\n"
+
+    assert main([*arguments, "list"]) == 0
+    assert capsys.readouterr().out.count("NEVER INSPECTED") == 2
+
+    for name, interval, category, notes in equipment:
+        assert main([*arguments, "inspect", name, "--result", "pass", "--notes", notes]) == 0
+        assert capsys.readouterr().out == f"Recorded: {name} on {demo_today.isoformat()} (pass)\n"
+
+    assert main([*arguments, "list"]) == 0
+    assert capsys.readouterr().out.count("\033[32mOK\033[0m") == 2
+    assert main([*arguments, "due"]) == 0
+    assert capsys.readouterr().out == "Nothing due.\n"
+    assert main([*arguments, "due", "--within", "7"]) == 0
+    due_output = capsys.readouterr().out
+    assert [line.split("|")[0].strip() for line in due_output.splitlines()[2:]] == [
+        "Portable work light",
+    ]
+
+    output_path = tmp_path / "new-inventory-report.md"
+    assert main([*arguments, "report", "--soon", "7", "--out", str(output_path)]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == f"Report written to {output_path}\n"
+    assert captured.err == ""
+    report = output_path.read_text(encoding="utf-8")
+    assert (
+        "- Total: 2\n"
+        "- Never inspected: 0\n"
+        "- Failed: 0\n"
+        "- Overdue: 0\n"
+        "- Due today: 0\n"
+        "- Due soon: 1\n"
+        "- OK: 1\n"
+    ) in report
+    attention = report.split("## Needs Attention\n", maxsplit=1)[1].split(
+        "## All Equipment\n", maxsplit=1
+    )[0]
+    assert "| Portable work light | electrical | OK |" in attention
+    assert "Tool trolley" not in attention
+
+
+@pytest.mark.parametrize(
+    ("within", "expected_names"),
+    [
+        ("6", []),
+        ("7", ["Cable tester"]),
+        ("8", ["Cable tester", "Laser level"]),
+    ],
+)
+def test_planning_windows_demo(
+    db_path: Path,
+    demo_today: date,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    within: str,
+    expected_names: list[str],
+) -> None:
+    arguments = ["--db", str(db_path)]
+    equipment = [
+        ("Cable tester", 7, "electrical", "Continuity checks passed."),
+        ("Laser level", 6, "surveying", "Reference alignment checked."),
+    ]
+    for name, days_ago, category, notes in equipment:
+        assert main([
+            *arguments, "add", name, "--interval", "14", "--category", category,
+        ]) == 0
+        inspection_day = demo_today - timedelta(days=days_ago)
+        assert main([
+            *arguments, "inspect", name, "--result", "pass",
+            "--date", inspection_day.isoformat(), "--notes", notes,
+        ]) == 0
+    capsys.readouterr()
+
+    items, inspections = _report_data(db_path)
+    rows = build_list_report(items, inspections, demo_today)
+    assert [row.status for row in rows] == ["OK", "OK"]
+    assert [row.next_due for row in rows] == [
+        demo_today + timedelta(days=7), demo_today + timedelta(days=8),
+    ]
+
+    assert main([*arguments, "due", "--within", within]) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    if expected_names:
+        assert [line.split("|")[0].strip() for line in captured.out.splitlines()[2:]] == expected_names
+    else:
+        assert captured.out == "Nothing due.\n"
+
+    output_path = tmp_path / f"planning-{within}-days.md"
+    assert main([*arguments, "report", "--soon", within, "--out", str(output_path)]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == f"Report written to {output_path}\n"
+    assert captured.err == ""
+    report = output_path.read_text(encoding="utf-8")
+    assert (
+        "- Total: 2\n"
+        "- Never inspected: 0\n"
+        "- Failed: 0\n"
+        "- Overdue: 0\n"
+        "- Due today: 0\n"
+        f"- Due soon: {len(expected_names)}\n"
+        f"- OK: {2 - len(expected_names)}\n"
+    ) in report
+    attention = report.split("## Needs Attention\n", maxsplit=1)[1].split(
+        "## All Equipment\n", maxsplit=1
+    )[0]
+    table_lines = [line for line in attention.splitlines() if line.startswith("|")]
+    assert [line.split("|")[1].strip() for line in table_lines[2:]] == expected_names
+    all_equipment = report.split("## All Equipment\n", maxsplit=1)[1]
+    assert "| Cable tester | electrical | OK |" in all_equipment
+    assert "| Laser level | surveying | OK |" in all_equipment
+    assert "\033[" not in report
+
+    if within == "7":
+        assert main([*arguments, "report"]) == 0
+        assert capsys.readouterr().out == report
+    assert _report_data(db_path) == (items, inspections)

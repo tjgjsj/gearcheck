@@ -11,6 +11,8 @@ Equipment, notes, and inspection intervals are illustrative, not safety guidance
 - [Demo 4: same-day repairs](#demo-4-same-day-repairs)
 - [Demo 5: backdated inspections](#demo-5-backdated-inspections)
 - [Demo 6: adding and removing equipment](#demo-6-adding-and-removing-equipment)
+- [Demo 7: build an inventory from scratch](#demo-7-build-an-inventory-from-scratch)
+- [Demo 8: compare planning windows](#demo-8-compare-planning-windows)
 - [Error examples](#error-examples)
 - [Repeat safely](#repeat-safely)
 - [Troubleshooting](#troubleshooting)
@@ -47,6 +49,7 @@ All demo databases and generated reports will go into this folder, **not** the p
 
 - Demos 1, 2, and 3 use separate databases; you can run any or all of them after preparation.
 - Demos 4, 5, and 6 use Demo 1's workshop database. Run Demo 4 before Demo 5.
+- Demos 7 and 8 build their own databases without the seed helper. They are independent of each other and all earlier demos; each requires only Preparation.
 - Perform each write step once to match the expected inspection counts. Each `inspect` command appends a new record; it does not edit a previous record.
 - Complete a scenario on the same calendar day you seed it. Inspection dates are relative to that day, so statuses naturally change on later days.
 
@@ -326,6 +329,126 @@ Expect `Refusing to remove SPARE SOCKET SET without --yes.` followed by `1`. Con
 
 Expect `Removed: Spare socket set`. The list returns to the original six items. Confirmed removal permanently deletes both this item and its inspection history, so only use `--yes` when you intend to delete them.
 
+## Demo 7: build an inventory from scratch
+
+**Goal:** start with an empty database, add your own equipment, and complete its first inspections.
+
+**Prerequisite:** finish Preparation in the same Terminal tab. Use a fresh `new-inventory-example.db` filename in `$DEMO_DIR`; if you already ran this demo, follow Repeat safely first. Do not run the seed helper for this demo. Unlike the seed helper, application commands open an existing database if the path already exists.
+
+### 1. Check an empty inventory
+
+```sh
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/new-inventory-example.db" list
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/new-inventory-example.db" due
+```
+
+The first command creates the database automatically and prints `No items.` The second prints `Nothing due.` Neither message is an error.
+
+### 2. Add two items
+
+```sh
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/new-inventory-example.db" add "Portable work light" --interval 7 --category electrical
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/new-inventory-example.db" add "Tool trolley" --interval 30 --category storage
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/new-inventory-example.db" list
+```
+
+Expect `Added: Portable work light (every 7 days)` and `Added: Tool trolley (every 30 days)`. The table now contains both items with last inspected `never`, next due `now`, and status `NEVER INSPECTED`. Adding an item does not count as inspecting it.
+
+### 3. Record the first inspections
+
+```sh
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/new-inventory-example.db" inspect "Portable work light" --result pass --notes "Cable, plug, and switch checked."
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/new-inventory-example.db" inspect "Tool trolley" --result pass --notes "Wheels, brakes, and drawers checked."
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/new-inventory-example.db" list
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/new-inventory-example.db" due
+```
+
+Each inspection prints `Recorded: NAME on YYYY-MM-DD (pass)` with the item's name and today's date. Both statuses become `OK`. The light is due in seven days and the trolley in 30 days. The default `due` command prints `Nothing due.` because neither needs attention today.
+
+### 4. Plan next week's work and save a report
+
+```sh
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/new-inventory-example.db" due --within 7
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/new-inventory-example.db" report --soon 7 --out "$DEMO_DIR/new-inventory-report.md"
+cat "$DEMO_DIR/new-inventory-report.md"
+```
+
+The due table contains **Portable work light** only: the seven-day boundary is included. The saved report has **Total 2, Due soon 1, OK 1**, and zero in every other summary category. Needs Attention contains the light, while All Equipment contains both items. The light's table status remains `OK`; its upcoming due date puts it in the Due soon count.
+
+## Demo 8: compare planning windows
+
+**Goal:** see exactly which items a look-ahead window includes, and compare reports without changing inspection dates or intervals.
+
+**Prerequisite:** finish Preparation in the same Terminal tab. Use a fresh `planning-example.db` filename in `$DEMO_DIR`; if it already exists from an earlier run, follow Repeat safely. This demo does not use the seed helper or any other demo's data. Complete all steps on the same day so the date boundaries match.
+
+### 1. Add equipment with matching intervals
+
+```sh
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/planning-example.db" add "Cable tester" --interval 14 --category electrical
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/planning-example.db" add "Laser level" --interval 14 --category surveying
+```
+
+Expect an `Added:` message for each item with `every 14 days`. Both items initially have no inspections.
+
+### 2. Enter two historical passing inspections
+
+Calculate the dates rather than typing fixed calendar dates:
+
+```sh
+SEVEN_DAYS_AGO=$(/Users/tj/gearcheck/venv/bin/python -c 'from datetime import date, timedelta; print(date.today() - timedelta(days=7))')
+SIX_DAYS_AGO=$(/Users/tj/gearcheck/venv/bin/python -c 'from datetime import date, timedelta; print(date.today() - timedelta(days=6))')
+printf 'Cable tester inspection: %s\nLaser level inspection: %s\n' "$SEVEN_DAYS_AGO" "$SIX_DAYS_AGO"
+```
+
+Check that the printed dates are seven and six days ago. Leave both variable names unchanged in the following commands:
+
+```sh
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/planning-example.db" inspect "Cable tester" --result pass --date "$SEVEN_DAYS_AGO" --notes "Continuity checks passed."
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/planning-example.db" inspect "Laser level" --result pass --date "$SIX_DAYS_AGO" --notes "Reference alignment checked."
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/planning-example.db" list
+```
+
+The list shows both items as `OK`. Each interval is 14 days, so the cable tester is next due **seven days from today**, and the laser level **eight days from today**.
+
+### 3. Compare the six-, seven-, and eight-day work lists
+
+```sh
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/planning-example.db" due --within 6
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/planning-example.db" due --within 7
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/planning-example.db" due --within 8
+```
+
+Expected results, in the same order:
+
+| Window | Output |
+| --- | --- |
+| 6 days | `Nothing due.` |
+| 7 days | A table containing Cable tester only |
+| 8 days | A table containing Cable tester, then Laser level |
+
+The final day of each window is included. Both items stay `OK` in every table; the window selects upcoming work, not a different equipment status.
+
+### 4. Save a separate report for each window
+
+```sh
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/planning-example.db" report --soon 6 --out "$DEMO_DIR/planning-6-days.md"
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/planning-example.db" report --soon 7 --out "$DEMO_DIR/planning-7-days.md"
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db "$DEMO_DIR/planning-example.db" report --soon 8 --out "$DEMO_DIR/planning-8-days.md"
+cat "$DEMO_DIR/planning-6-days.md"
+cat "$DEMO_DIR/planning-7-days.md"
+cat "$DEMO_DIR/planning-8-days.md"
+```
+
+Each generation command prints `Report written to` followed by its output path. The three filenames keep the reports separate instead of replacing one another. Compare their summaries and Needs Attention tables:
+
+| Report | Total | Due soon | OK | Needs Attention |
+| --- | --- | --- | --- | --- |
+| `planning-6-days.md` | 2 | 0 | 2 | Headers only; no item rows |
+| `planning-7-days.md` | 2 | 1 | 1 | Cable tester |
+| `planning-8-days.md` | 2 | 2 | 0 | Cable tester, then Laser level |
+
+All other summary counts are zero, and All Equipment contains both items in every report. Omitting `--soon` would use seven days, matching the middle report. Changing `--soon` or `--within` does not modify the database's inspection history or intervals. You can repeat these read-only comparison steps; repeating `--out` replaces only the report at that path.
+
 ## Error examples
 
 **Prerequisite:** seed the workshop in Demo 1. These commands deliberately fail without changing the equipment. Run them in order in your normal interactive Terminal, not in a script configured to stop on errors. Each `echo $?` prints the preceding command's exit code.
@@ -387,6 +510,7 @@ Check that the new path is nonempty. The earlier folder remains unchanged; the v
 - **Demo 1, 2, or 3:** start at that demo's seed step.
 - **Demo 4 or 6:** seed the workshop using Demo 1, step 1, then run the desired demo.
 - **Demo 5:** seed the workshop using Demo 1, step 1, complete Demo 4, then run Demo 5.
+- **Demo 7 or 8:** start at that demo's first step; its commands create the new database without seeding.
 
 You do not need to delete files or alter the project's real databases.
 
@@ -419,4 +543,4 @@ cd /Users/tj/gearcheck
 /Users/tj/gearcheck/venv/bin/python -m pytest -q
 ```
 
-All tests should pass; the current suite has 77 tests. [`tests/test_examples.py`](../tests/test_examples.py) checks all three datasets, calendar boundaries, the report snapshot, existing-file protection, and the repair, backdating, and removal workflows. Test databases live under pytest's `tmp_path`, not in your demo folder or the project's real databases.
+All tests should pass; the current suite has 81 tests. [`tests/test_examples.py`](../tests/test_examples.py) checks all three datasets, calendar boundaries, the report snapshot, existing-file protection, and the repair, backdating, removal, new-inventory, and planning-window workflows. Test databases live under pytest's `tmp_path`, not in your demo folder or the project's real databases.
