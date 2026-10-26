@@ -36,6 +36,9 @@ Errors: unknown item; invalid date; date in the future.
 3. list
 Table of all items: name, category, interval, last inspected
 (or "never"), last result, next due, status. Sorted by name.
+The list status column uses ANSI colors: green for "OK", yellow for
+"DUE TODAY", and red for "OVERDUE" and "FAILED" statuses.
+"NEVER INSPECTED" remains uncolored. Other commands do not use colors.
 4. due [--within DAYS]
 Items that need attention: never inspected, failed, overdue, or with a
 next due date within DAYS days of today (default 0 = due today or
@@ -64,6 +67,25 @@ tests never touch ./gearcheck.db.
 - Cover every status rule, plus: duplicate add, non-positive interval,
 inspect unknown item, future date rejected, case-insensitive names,
 due sorting, same-day tie, remove refuses without --yes, exit code 1
-on user errors.
+on user errors. Verify the list status colors and that other statuses and
+commands remain uncolored.
 ### Out of scope for v1.0
-Colors, config files, network access, third-party packages.
+Colors outside the list status column, config files, network access,
+third-party packages.
+## Spec v1.1 - Report command
+7. report [--out FILE] [--soon DAYS]
+Produces a Markdown report. --soon defaults to 7.
+- Line 1: "# GearCheck Inspection Report"
+- Line 2: "Generated: YYYY-MM-DD"
+- "## Summary": counts for Total, Never inspected, Failed, Overdue,
+Due today, Due soon (status OK, next due 1 to DAYS days away), and
+OK (everything else). The six category counts add up to Total.
+- "## Needs Attention": Markdown table (Name | Category | Status |
+Next Due) of every item that is not plain OK, same sort as `due`.
+- "## All Equipment": Markdown table of every item, sorted by name.
+- With --out FILE: write the file and print "Report written to FILE".
+Without --out: print the report to stdout.
+- Report text is built by a pure function (items + today in, string
+out) so it can be unit tested without a database.
+- Tests: category counts for a fixture with one item in each category;
+--out writes the file; counts add up to Total.
