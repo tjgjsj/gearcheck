@@ -94,6 +94,20 @@ The report includes summary counts, equipment needing attention, and all equipme
 
 Permanently deletes the item and its inspection history. Without `--yes`, removal is refused and nothing changes.
 
+## Runnable examples
+
+Try a realistic workshop with six items covering every report category:
+
+```sh
+/Users/tj/gearcheck/venv/bin/python -m examples.demo --db workshop-example.db --scenario workshop
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db workshop-example.db list
+/Users/tj/gearcheck/venv/bin/python -m gearcheck --db workshop-example.db due --within 7
+```
+
+The example helper requires an explicit, new database path and refuses to overwrite existing files. It uses dates relative to today, so no manual date editing is needed. It does not change GearCheck's commands or use the default database.
+
+See the [examples walkthrough](examples/README.md) for **workshop, safety, and facilities** datasets, repair and backdating workflows, expected errors, and a [sample Markdown report](examples/workshop-report.md).
+
 ## Tests
 
 Run from `/Users/tj/gearcheck`:
