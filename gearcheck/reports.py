@@ -1,4 +1,4 @@
-"""Pure list and due report construction."""
+"""Pure list, due, and Markdown report construction."""
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -98,3 +98,74 @@ def build_due_report(
         )
 
     return sorted(due_rows, key=sort_key)
+
+
+def _markdown_table(rows: Sequence[ReportRow]) -> str:
+    lines = [
+        "| Name | Category | Status | Next Due |",
+        "| --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        next_due = row.next_due.isoformat() if row.next_due else "now"
+        lines.append(f"| {row.name} | {row.category} | {row.status} | {next_due} |")
+    return "\n".join(lines)
+
+
+def build_markdown_report(
+    items: Sequence[ItemRecord],
+    inspections_by_item: Mapping[int, Sequence[InspectionRecord]],
+    today: date,
+    soon_days: int = 7,
+) -> str:
+    """Build a Markdown report without reading the clock or database."""
+    rows = build_list_report(items, inspections_by_item, today)
+    attention_rows = build_due_report(items, inspections_by_item, today, soon_days)
+    counts = {
+        "Never inspected": 0,
+        "Failed": 0,
+        "Overdue": 0,
+        "Due today": 0,
+        "Due soon": 0,
+        "OK": 0,
+    }
+    for row in rows:
+        if row.status == "NEVER INSPECTED":
+            category = "Never inspected"
+        elif row.status == "FAILED - OUT OF SERVICE":
+            category = "Failed"
+        elif row.status.startswith("OVERDUE"):
+            category = "Overdue"
+        elif row.status == "DUE TODAY":
+            category = "Due today"
+        elif (
+            row.status == "OK"
+            and row.next_due is not None
+            and 1 <= (row.next_due - today).days <= soon_days
+        ):
+            category = "Due soon"
+        else:
+            category = "OK"
+        counts[category] += 1
+
+    lines = [
+        "# GearCheck Inspection Report",
+        f"Generated: {today.isoformat()}",
+        "",
+        "## Summary",
+        "",
+        f"- Total: {len(rows)}",
+    ]
+    lines.extend(f"- {category}: {count}" for category, count in counts.items())
+    lines.extend(
+        [
+            "",
+            "## Needs Attention",
+            "",
+            _markdown_table(attention_rows),
+            "",
+            "## All Equipment",
+            "",
+            _markdown_table(rows),
+        ]
+    )
+    return "\n".join(lines) + "\n"

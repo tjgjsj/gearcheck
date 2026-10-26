@@ -23,8 +23,15 @@ from .reports import (
     ReportRow,
     build_due_report,
     build_list_report,
+    build_markdown_report,
 )
 from .status import InspectionRecord
+
+
+_ANSI_GREEN = "\033[32m"
+_ANSI_YELLOW = "\033[33m"
+_ANSI_RED = "\033[31m"
+_ANSI_RESET = "\033[0m"
 
 
 class UserError(Exception):
@@ -58,6 +65,10 @@ def build_parser() -> argparse.ArgumentParser:
     remove_parser = commands.add_parser("remove", help="remove an item")
     remove_parser.add_argument("name")
     remove_parser.add_argument("--yes", action="store_true")
+
+    report_parser = commands.add_parser("report", help="produce a Markdown inspection report")
+    report_parser.add_argument("--out", type=Path)
+    report_parser.add_argument("--soon", default="7")
 
     return parser
 
@@ -121,7 +132,21 @@ def _inspection_records(
     return dict(records)
 
 
-def _display_table(rows: Sequence[ReportRow]) -> str:
+def _colored_status_cell(status: str, width: int) -> str:
+    if status == "OK":
+        color = _ANSI_GREEN
+    elif status == "DUE TODAY":
+        color = _ANSI_YELLOW
+    elif status.startswith("OVERDUE") or status == "FAILED - OUT OF SERVICE":
+        color = _ANSI_RED
+    else:
+        return status.ljust(width)
+    return f"{color}{status}{_ANSI_RESET}" + " " * (width - len(status))
+
+
+def _display_table(
+    rows: Sequence[ReportRow], *, color_status: bool = False
+) -> str:
     headers = (
         "NAME",
         "CATEGORY",
@@ -151,10 +176,14 @@ def _display_table(rows: Sequence[ReportRow]) -> str:
     ]
     lines = [" | ".join(header.ljust(widths[index]) for index, header in enumerate(headers))]
     lines.append("-+-".join("-" * width for width in widths))
-    lines.extend(
-        " | ".join(value.ljust(widths[index]) for index, value in enumerate(row))
-        for row in values
-    )
+    for row in values:
+        cells = [
+            _colored_status_cell(value, widths[index])
+            if color_status and index == len(headers) - 1
+            else value.ljust(widths[index])
+            for index, value in enumerate(row)
+        ]
+        lines.append(" | ".join(cells))
     return "\n".join(lines)
 
 
@@ -208,7 +237,7 @@ def _run(args: argparse.Namespace) -> None:
         if not rows:
             print("No items.")
         else:
-            print(_display_table(rows))
+            print(_display_table(rows, color_status=True))
         return
 
     if args.command == "due":
@@ -224,6 +253,22 @@ def _run(args: argparse.Namespace) -> None:
             print("Nothing due.")
         else:
             print(_display_table(rows))
+        return
+
+    if args.command == "report":
+        soon = _non_negative_integer(args.soon, "--soon")
+        with open_database(args.db) as connection:
+            report = build_markdown_report(
+                _item_records(connection),
+                _inspection_records(connection),
+                today,
+                soon,
+            )
+        if args.out is None:
+            print(report, end="")
+        else:
+            args.out.write_text(report, encoding="utf-8")
+            print(f"Report written to {args.out}")
         return
 
     if args.command == "history":
